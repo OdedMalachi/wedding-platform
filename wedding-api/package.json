@@ -1,0 +1,27 @@
+{
+  "name": "wedding-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wedding Platform Backend REST API Server (Node.js + TypeScript + PostgreSQL)",
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.40.0",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "@types/pg": "^8.11.11",
+    "drizzle-kit": "^0.30.5",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7"
+  }
+}

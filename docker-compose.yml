@@ -1,0 +1,19 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: wedding-platform-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wedding_admin
+      POSTGRES_PASSWORD: wedding_secret_password
+      POSTGRES_DB: wedding_platform
+    ports:
+      - '5432:5432'
+    volumes:
+      - wedding_pgdata:/var/lib/postgresql/data
+      - ./wedding-api/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+volumes:
+  wedding_pgdata:
