@@ -117,6 +117,10 @@ export function GuestInvitationView({
 
   const handleSubmitRsvp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPreview) {
+      setRsvpSuccess(true);
+      return;
+    }
     setSubmittingRsvp(true);
     setRsvpError(null);
     setRsvpSuccess(false);

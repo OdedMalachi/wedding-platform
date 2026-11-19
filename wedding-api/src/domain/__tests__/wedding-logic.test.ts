@@ -7,6 +7,14 @@ import {
   validateAndNormalizeRsvp,
   validateSeatAssignment,
 } from '../wedding-logic.ts';
+import {
+  checkRateLimit,
+  hashPassword,
+  parseCookies,
+  signSessionToken,
+  verifyPassword,
+  verifySessionToken,
+} from '../../auth/security.ts';
 import type { Guest, SeatingTable, Wedding } from '../../types/wedding.ts';
 
 const mockWedding: Wedding = {
@@ -184,5 +192,40 @@ describe('Wedding API Domain Logic', () => {
     expect(stats.totalConfirmedPeople).toBe(3);
     expect(stats.seatedPeople).toBe(3);
     expect(stats.checkedInPeople).toBe(3);
+  });
+
+  it('hashes and verifies passwords securely with scrypt', () => {
+    const hash = hashPassword('MySecureWeddingPass2026!');
+    expect(hash.startsWith('scrypt:')).toBe(true);
+    expect(verifyPassword('MySecureWeddingPass2026!', hash)).toBe(true);
+    expect(verifyPassword('WrongPassword', hash)).toBe(false);
+  });
+
+  it('signs and verifies JWT session tokens and rejects tampered or expired tokens', () => {
+    const token = signSessionToken({ userId: 'u-123', email: 'couple@wedding.co.il' }, 3600);
+    const verified = verifySessionToken(token);
+    expect(verified).not.toBeNull();
+    expect(verified?.userId).toBe('u-123');
+    expect(verified?.email).toBe('couple@wedding.co.il');
+
+    // Tampered signature must fail
+    const tampered = token.slice(0, -3) + 'xyz';
+    expect(verifySessionToken(tampered)).toBeNull();
+
+    // Expired token must fail
+    const expired = signSessionToken({ userId: 'u-123', email: 'couple@wedding.co.il' }, -10);
+    expect(verifySessionToken(expired)).toBeNull();
+  });
+
+  it('parses session cookies and enforces rate limiting buckets', () => {
+    const cookies = parseCookies('foo=bar; wedding_session=my-jwt-token; theme=gold');
+    expect(cookies.wedding_session).toBe('my-jwt-token');
+
+    const bucketKey = `test-rate-${Date.now()}`;
+    expect(checkRateLimit(bucketKey, 2, 60000).allowed).toBe(true);
+    expect(checkRateLimit(bucketKey, 2, 60000).allowed).toBe(true);
+    const blocked = checkRateLimit(bucketKey, 2, 60000);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
   });
 });
