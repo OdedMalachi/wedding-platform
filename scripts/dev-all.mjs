@@ -17,7 +17,7 @@ const apiProc = spawn(
 
 const webProc = spawn(
   process.execPath,
-  [path.join(rootDir, 'node_modules/next/dist/bin/next'), 'dev', '--turbopack', '--port', '3000'],
+  [path.join(rootDir, 'node_modules/next/dist/bin/next'), 'dev', '--port', '3000'],
   {
     cwd: path.join(rootDir, 'wedding-web'),
     stdio: 'inherit',
