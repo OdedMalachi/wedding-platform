@@ -8,7 +8,7 @@ COPY wedding-api/package.json ./wedding-api/
 COPY wedding-web/package.json ./wedding-web/
 
 # Install all workspace dependencies
-RUN npm ci
+RUN npm install
 
 # Copy application source
 COPY wedding-api ./wedding-api
