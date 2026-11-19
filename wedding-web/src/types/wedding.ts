@@ -47,6 +47,46 @@ export interface GiftConfig {
   bankDetails: string;
 }
 
+export interface WeddingVendorItem {
+  id: string;
+  category: string;
+  vendorName: string;
+  phone: string;
+  totalPrice: number;
+  paidAmount: number;
+  status: 'QUOTE' | 'DEPOSIT_PAID' | 'PAID_IN_FULL';
+  notes: string;
+}
+
+export interface WeddingTaskItem {
+  id: string;
+  title: string;
+  category: string;
+  assignee: 'BRIDE' | 'GROOM' | 'BOTH' | 'FAMILY';
+  dueTiming: string;
+  completed: boolean;
+}
+
+export interface WeddingTimelineItem {
+  id: string;
+  time: string;
+  title: string;
+  location: string;
+  notes: string;
+}
+
+export interface ManagementConfig {
+  cateringPricePerPlate: number;
+  reservePercentage: number;
+  eventManagerName: string;
+  eventManagerPhone: string;
+  bestManName: string;
+  bestManPhone: string;
+  vendors: WeddingVendorItem[];
+  tasks: WeddingTaskItem[];
+  timeline: WeddingTimelineItem[];
+}
+
 export interface Wedding {
   id: string;
   slug: string;
@@ -63,6 +103,7 @@ export interface Wedding {
   defaultLocale: Locale;
   themeConfig: ThemeConfig;
   giftConfig: GiftConfig;
+  managementConfig?: ManagementConfig;
   createdAt: string;
 }
 

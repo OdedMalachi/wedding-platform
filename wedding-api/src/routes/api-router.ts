@@ -108,7 +108,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
     return sendJson(req, res, 204, {});
   }
 
-  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost:4000'}`);
+  const url = new URL(req.url || '/', 'http://localhost');
   const pathname = url.pathname;
   const clientIp = getClientIp(req);
 

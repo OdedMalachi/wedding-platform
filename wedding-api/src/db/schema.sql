@@ -26,8 +26,11 @@ CREATE TABLE IF NOT EXISTS weddings (
   default_locale VARCHAR(10) NOT NULL DEFAULT 'he',
   theme_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   gift_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  management_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE weddings ADD COLUMN IF NOT EXISTS management_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS wedding_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

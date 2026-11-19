@@ -3,9 +3,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Wedding Platform 💍 — Multi-Wedding Invitations, RSVP, WhatsApp & Seating',
+  title: 'מערכת ניהול חתונה והזמנות דיגיטליות',
   description:
-    'Multi-Wedding SaaS Platform for digital invitations, guest RSVP management, WhatsApp automation, interactive seating charts, digital gifts, and reception check-in.',
+    'ניהול מוזמנים, אישורי הגעה, שליחת הזמנות בוואטסאפ, סידורי הושבה וקליטת אורחים באולם.',
 };
 
 export default function RootLayout({
@@ -15,7 +15,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="he" dir="rtl">
-      <body>{children}</body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Heebo:wght@400;500;600;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="bg-neutral-100 text-neutral-900 antialiased">{children}</body>
     </html>
   );
 }

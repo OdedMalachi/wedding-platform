@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
+:root {
+  --font-heebo: 'Heebo', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-frank: 'Frank Ruhl Libre', Georgia, serif;
+}
+
 @layer base {
   body {
-    @apply bg-stone-100 text-stone-900 antialiased;
+    @apply bg-neutral-100 text-neutral-900 antialiased;
+    font-family: var(--font-heebo);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 }

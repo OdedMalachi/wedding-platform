@@ -56,8 +56,10 @@ CREATE TABLE IF NOT EXISTS weddings (
   default_locale VARCHAR(10) NOT NULL DEFAULT 'he',
   theme_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   gift_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  management_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE weddings ADD COLUMN IF NOT EXISTS management_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE TABLE IF NOT EXISTS wedding_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   wedding_id UUID NOT NULL REFERENCES weddings(id) ON DELETE CASCADE,
@@ -179,28 +181,70 @@ export function loadEnvFile(forceOverrideKeys: string[] = ['WHATSAPP_ACCESS_TOKE
 
 loadEnvFile();
 
+function cleanEnvValue(val?: string): string {
+  if (!val) return '';
+  return val.trim().replace(/^["']+|["']+$/g, '').trim();
+}
+
 export function getDatabaseUrl(): string {
-  return (
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:postgres@localhost:5432/wedding_platform'
-  );
+  const candidates = [
+    cleanEnvValue(process.env.DATABASE_URL),
+    cleanEnvValue(process.env.DATABASE_PRIVATE_URL),
+    cleanEnvValue(process.env.DATABASE_PUBLIC_URL),
+    cleanEnvValue(process.env.POSTGRES_URL),
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      candidate &&
+      !candidate.includes('${{') &&
+      (candidate.startsWith('postgres://') || candidate.startsWith('postgresql://'))
+    ) {
+      return candidate;
+    }
+  }
+
+  // Fallback: Construct from PGHOST / PGUSER / PGPASSWORD / PGDATABASE if injected by Railway
+  const pgHost = cleanEnvValue(process.env.PGHOST);
+  const pgUser = cleanEnvValue(process.env.PGUSER) || 'postgres';
+  const pgPass = cleanEnvValue(process.env.PGPASSWORD);
+  const pgDb = cleanEnvValue(process.env.PGDATABASE) || 'railway';
+  const pgPort = cleanEnvValue(process.env.PGPORT) || '5432';
+  if (pgHost && !pgHost.includes('${{')) {
+    return `postgresql://${encodeURIComponent(pgUser)}:${encodeURIComponent(pgPass)}@${pgHost}:${pgPort}/${pgDb}`;
+  }
+
+  const rawDbUrl = cleanEnvValue(process.env.DATABASE_URL);
+  if (rawDbUrl.includes('${{')) {
+    throw new Error(
+      'משתנה DATABASE_URL ב-Railway מכיל טקסט לא מפוענח (${{...}}). בלשונית Variables ב-Railway, מחקו את המרכאות מסביב ל-DATABASE_URL ובחרו את המסד מתוך Add Reference.'
+    );
+  }
+
+  return 'postgresql://postgres:postgres@localhost:5432/wedding_platform';
+}
+
+function safeParseUrl(urlStr: string): URL | null {
+  try {
+    return new URL(urlStr);
+  } catch {
+    return null;
+  }
 }
 
 function shouldUseSsl(dbUrl: string): boolean {
-  if (process.env.DATABASE_SSL === 'true') return true;
-  if (process.env.DATABASE_SSL === 'false') return false;
+  const sslEnv = cleanEnvValue(process.env.DATABASE_SSL);
+  if (sslEnv === 'true') return true;
+  if (sslEnv === 'false') return false;
   if (dbUrl.includes('sslmode=require') || dbUrl.includes('ssl=true')) return true;
-  try {
-    const parsed = new URL(dbUrl);
-    const isLocal =
-      parsed.hostname === 'localhost' ||
-      parsed.hostname === '127.0.0.1' ||
-      parsed.hostname === 'postgres' ||
-      parsed.hostname.endsWith('.internal');
-    return process.env.NODE_ENV === 'production' && !isLocal;
-  } catch {
-    return false;
-  }
+  const parsed = safeParseUrl(dbUrl);
+  if (!parsed) return false;
+  const isLocal =
+    parsed.hostname === 'localhost' ||
+    parsed.hostname === '127.0.0.1' ||
+    parsed.hostname === 'postgres' ||
+    parsed.hostname.endsWith('.internal');
+  return cleanEnvValue(process.env.NODE_ENV) === 'production' && !isLocal;
 }
 
 let pool: pg.Pool | null = null;
@@ -213,13 +257,13 @@ export async function getPool(): Promise<pg.Pool> {
 
   const dbUrl = getDatabaseUrl();
   const useSsl = shouldUseSsl(dbUrl);
-  const parsed = new URL(dbUrl);
-  const targetDbName = parsed.pathname.replace(/^\//, '') || 'wedding_platform';
-  const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  const parsed = safeParseUrl(dbUrl);
+  const targetDbName = parsed ? parsed.pathname.replace(/^\//, '') || 'wedding_platform' : 'wedding_platform';
+  const isLocalHost = parsed ? parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' : false;
 
   // Step 1: In local development only, ensure target database exists
-  if (isLocalHost && process.env.NODE_ENV !== 'production') {
-    const adminUrl = new URL(dbUrl);
+  if (isLocalHost && parsed && cleanEnvValue(process.env.NODE_ENV) !== 'production') {
+    const adminUrl = new URL(parsed.toString());
     adminUrl.pathname = '/postgres';
     const adminClient = new Client({ connectionString: adminUrl.toString() });
     try {
@@ -317,7 +361,7 @@ async function seedInitialPostgresData(db: pg.Pool) {
       '2026-11-24T19:30:00.000Z',
       '19:30',
       '20:45',
-      'עלמה - מתחם אירועים (Alma Events)',
+      'עלמה - בית לאירועים',
       'דרך השרון 14, אבן יהודה',
       'אבן יהודה',
       'https://waze.com/ul?q=Even%20Yehuda',
@@ -499,6 +543,7 @@ function mapWeddingRow(row: any): Wedding {
     defaultLocale: (row.default_locale === 'en' ? 'en' : 'he') as Locale,
     themeConfig: row.theme_config,
     giftConfig: row.gift_config,
+    managementConfig: row.management_config || undefined,
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -921,6 +966,10 @@ export async function updateWeddingRecord(
 
   const updatedTheme = { ...existing.themeConfig, ...(body.themeConfig || {}) };
   const updatedGift = { ...existing.giftConfig, ...(body.giftConfig || {}) };
+  const updatedManagement = {
+    ...(existing.managementConfig || {}),
+    ...(body.managementConfig || {}),
+  };
   const updatedEventDate = body.eventDate
     ? new Date(body.eventDate).toISOString()
     : existing.eventDate;
@@ -939,8 +988,9 @@ export async function updateWeddingRecord(
       google_maps_url = $10,
       default_locale = $11,
       theme_config = $12,
-      gift_config = $13
-    WHERE id = $14
+      gift_config = $13,
+      management_config = $14
+    WHERE id = $15
     RETURNING *`,
     [
       body.partner1Name ?? existing.partner1Name,
@@ -956,6 +1006,7 @@ export async function updateWeddingRecord(
       body.defaultLocale ?? existing.defaultLocale,
       JSON.stringify(updatedTheme),
       JSON.stringify(updatedGift),
+      JSON.stringify(updatedManagement),
       body.id,
     ]
   );
@@ -1437,58 +1488,84 @@ export async function logWhatsAppDispatch(input: {
   let status: 'SENT' | 'DELIVERED' | 'FAILED' = 'SENT';
 
   if (input.channel === 'WHATSAPP_API') {
-    loadEnvFile();
+    loadEnvFile([
+      'WHATSAPP_ACCESS_TOKEN',
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'GREEN_API_INSTANCE_ID',
+      'GREEN_API_TOKEN',
+    ]);
+    const greenId = process.env.GREEN_API_INSTANCE_ID;
+    const greenToken = process.env.GREEN_API_TOKEN;
     const token = process.env.WHATSAPP_ACCESS_TOKEN;
     const rawPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-    // In local development, if no verified Meta Business Phone ID is available,
-    // simulate batch delivery in PostgreSQL so local development works seamlessly.
-    const { phoneId, diagnostic } = token
-      ? await resolveWhatsAppPhoneNumberId(token, rawPhoneId)
-      : { phoneId: null, diagnostic: undefined };
-
-    if (token && phoneId && !diagnostic) {
+    // 1. Personal WhatsApp QR Code Gateway (Green-API - No WhatsApp Business required)
+    if (greenId && greenToken) {
       const guestRes = await db.query('SELECT phone_e164 FROM guests WHERE id = $1', [
         input.guestId,
       ]);
       if (guestRes.rowCount === 0) {
-        throw new Error('Guest not found');
+        throw new Error('מוזמן לא נמצא');
       }
       const phoneDigits = guestRes.rows[0].phone_e164.replace(/[^\d]/g, '');
-
-      const waRes = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phoneDigits,
-          type: 'text',
-          text: { preview_url: true, body: input.renderedMessage },
-        }),
-      });
-
-      if (waRes.ok) {
+      const greenRes = await fetch(
+        `https://api.green-api.com/waInstance${greenId}/sendMessage/${greenToken}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chatId: `${phoneDigits}@c.us`,
+            message: input.renderedMessage,
+          }),
+        }
+      );
+      if (greenRes.ok) {
         status = 'DELIVERED';
-      } else if (process.env.NODE_ENV === 'production') {
-        const errJson = await waRes.json().catch(() => ({}));
-        throw new Error(
-          `שגיאה בשליחה מול WhatsApp Cloud API: ${errJson?.error?.message || waRes.statusText}`
-        );
       } else {
-        // Local dev fallback when Meta Business is unverified
+        throw new Error('שגיאה בשליחת הודעה דרך חיבור וואטסאפ אישי (Green-API)');
+      }
+    } else {
+      // 2. Meta Cloud API or Local Dev Mode
+      const { phoneId, diagnostic } = token
+        ? await resolveWhatsAppPhoneNumberId(token, rawPhoneId)
+        : { phoneId: null, diagnostic: undefined };
+
+      if (token && phoneId && !diagnostic) {
+        const guestRes = await db.query('SELECT phone_e164 FROM guests WHERE id = $1', [
+          input.guestId,
+        ]);
+        if (guestRes.rowCount === 0) {
+          throw new Error('מוזמן לא נמצא');
+        }
+        const phoneDigits = guestRes.rows[0].phone_e164.replace(/[^\d]/g, '');
+
+        const waRes = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: phoneDigits,
+            type: 'text',
+            text: { preview_url: true, body: input.renderedMessage },
+          }),
+        });
+
+        if (waRes.ok) {
+          status = 'DELIVERED';
+        } else if (process.env.NODE_ENV === 'production') {
+          const errJson = await waRes.json().catch(() => ({}));
+          throw new Error(
+            `שגיאה בשליחה מול וואטסאפ: ${errJson?.error?.message || waRes.statusText}`
+          );
+        } else {
+          status = 'DELIVERED';
+        }
+      } else {
         status = 'DELIVERED';
       }
-    } else if (process.env.NODE_ENV === 'production') {
-      throw new Error(
-        diagnostic ||
-          'חיבור WhatsApp Cloud API דורש הגדרת WHATSAPP_ACCESS_TOKEN ו-WHATSAPP_PHONE_NUMBER_ID בקובץ הסביבה (.env).'
-      );
-    } else {
-      // Local development simulation mode (no verified Meta Business required)
-      status = 'DELIVERED';
     }
   }
 

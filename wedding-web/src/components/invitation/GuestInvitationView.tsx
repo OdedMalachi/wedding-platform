@@ -4,28 +4,22 @@ import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Calendar,
-  CheckCircle2,
+  Check,
   Clock,
   Gift,
-  Heart,
   MapPin,
   Navigation,
-  Sparkles,
-  Users,
-  Utensils,
-  MessageSquareHeart,
   QrCode,
-  Globe,
+  Utensils,
 } from 'lucide-react';
 import type {
   Greeting,
   Guest,
-  Locale,
   MealPreferences,
   RsvpStatus,
   Wedding,
 } from '@/types/wedding';
-import { DICTIONARIES } from '@/i18n/dictionaries';
+import { HEBREW_DICT } from '@/i18n/dictionaries';
 
 interface GuestInvitationViewProps {
   wedding: Wedding;
@@ -44,8 +38,7 @@ export function GuestInvitationView({
   onRsvpUpdated,
   onGreetingAdded,
 }: GuestInvitationViewProps) {
-  const [locale, setLocale] = useState<Locale>(wedding.defaultLocale || 'he');
-  const dict = DICTIONARIES[locale];
+  const dict = HEBREW_DICT;
 
   const [rsvpStatus, setRsvpStatus] = useState<RsvpStatus>(guest.invitation.rsvpStatus);
   const [confirmedAdults, setConfirmedAdults] = useState<number>(
@@ -74,14 +67,9 @@ export function GuestInvitationView({
   const [blessingAuthor, setBlessingAuthor] = useState(guest.fullName);
   const [blessingRelation, setBlessingRelation] = useState(guest.groupName || '');
   const [blessingText, setBlessingText] = useState('');
-  const [blessingGiftAmount, setBlessingGiftAmount] = useState('');
   const [blessingSaved, setBlessingSaved] = useState(false);
 
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0 });
-
-  useEffect(() => {
-    setLocale(wedding.defaultLocale || 'he');
-  }, [wedding.defaultLocale]);
 
   useEffect(() => {
     const computeCountdown = () => {
@@ -139,12 +127,12 @@ export function GuestInvitationView({
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to save RSVP');
+        throw new Error(data.error || 'שגיאה בשמירת אישור ההגעה');
       }
       setRsvpSuccess(true);
       onRsvpUpdated?.(data.guest);
     } catch (err) {
-      setRsvpError(err instanceof Error ? err.message : 'Error saving RSVP');
+      setRsvpError(err instanceof Error ? err.message : 'שגיאה בשמירת אישור ההגעה');
     } finally {
       setSubmittingRsvp(false);
     }
@@ -153,6 +141,11 @@ export function GuestInvitationView({
   const handlePostBlessing = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!blessingText.trim()) return;
+    if (isPreview) {
+      setBlessingSaved(true);
+      setBlessingText('');
+      return;
+    }
     try {
       const res = await fetch('/api/greetings', {
         method: 'POST',
@@ -163,14 +156,12 @@ export function GuestInvitationView({
           authorName: blessingAuthor || guest.fullName,
           relationship: blessingRelation,
           message: blessingText,
-          giftAmountReported: blessingGiftAmount ? Number(blessingGiftAmount) : undefined,
         }),
       });
       const data = await res.json();
       if (res.ok && data.greeting) {
         setGreetings((prev) => [data.greeting, ...prev]);
         setBlessingText('');
-        setBlessingGiftAmount('');
         setBlessingSaved(true);
         onGreetingAdded?.(data.greeting);
       }
@@ -187,7 +178,7 @@ export function GuestInvitationView({
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'BEGIN:VEVENT',
-      `SUMMARY:${wedding.partner1Name} & ${wedding.partner2Name} Wedding`,
+      `SUMMARY:החתונה של ${wedding.partner1Name} ו${wedding.partner2Name}`,
       `DTSTART:${fmt(start)}`,
       `DTEND:${fmt(end)}`,
       `LOCATION:${wedding.venueName} - ${wedding.venueAddress}`,
@@ -206,93 +197,82 @@ export function GuestInvitationView({
   };
 
   const isMidnight = wedding.themeConfig.templateId === 'midnight-velvet';
-  const formattedEventDate = new Date(wedding.eventDate).toLocaleDateString(
-    locale === 'he' ? 'he-IL' : 'en-US',
-    { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
-  );
+  const formattedEventDate = new Date(wedding.eventDate).toLocaleDateString('he-IL', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const cardClass = isMidnight
+    ? 'border-slate-800 bg-slate-900 text-slate-100'
+    : 'border-stone-200/90 bg-white text-stone-900';
 
   return (
     <div
       dir="rtl"
       style={{
-        backgroundColor: isMidnight ? '#0f172a' : wedding.themeConfig.backgroundColor,
+        backgroundColor: isMidnight ? '#0b1120' : wedding.themeConfig.backgroundColor,
         color: isMidnight ? '#f8fafc' : '#1c1917',
       }}
-      className={`min-h-full w-full transition-colors duration-300 ${
-        wedding.themeConfig.fontFamily === 'serif' ? 'font-serif' : 'font-sans'
-      }`}
+      className="min-h-full w-full font-sans transition-colors duration-200"
     >
-      <div className="mx-auto max-w-md pb-16 shadow-2xl">
-        {/* Top Floating Language Switcher */}
-        <div className="sticky top-0 z-20 flex items-center justify-between bg-black/40 px-4 py-2.5 text-xs text-white backdrop-blur-md">
-          <span className="flex items-center gap-1.5 font-medium">
-            <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-            {wedding.partner1Name} &amp; {wedding.partner2Name}
-          </span>
-          <div className="flex items-center gap-1">
-            <Globe className="h-3.5 w-3.5 opacity-80" />
-            {(['he', 'en'] as Locale[]).map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => setLocale(lang)}
-                className={`rounded-full px-2 py-0.5 transition ${
-                  locale === lang
-                    ? 'bg-white font-semibold text-stone-900'
-                    : 'text-white/80 hover:bg-white/20'
-                }`}
-              >
-                {lang.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </div>
-
+      <div className="mx-auto max-w-md pb-16">
         {/* Hero Cover Section */}
-        <div className="relative h-96 w-full overflow-hidden">
+        <div className="relative h-96 w-full overflow-hidden bg-stone-900">
           <img
             src={wedding.themeConfig.coverImageUrl}
-            alt={`${wedding.partner1Name} & ${wedding.partner2Name}`}
+            alt={`${wedding.partner1Name} ו${wedding.partner2Name}`}
             className="h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-6 text-center text-white">
-            <p className="mb-2 text-xs tracking-[0.25em] uppercase text-amber-200">
-              {dict.invitation.saveTheDate}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/15" />
+
+          <div className="absolute top-4 right-5 text-[11px] font-medium text-white/80">
+            בס״ד
+          </div>
+
+          <div className="absolute inset-x-0 bottom-0 p-7 text-center text-white">
+            <p className="mb-2 text-xs font-medium tracking-widest text-stone-300">
+              קול ששון וקול שמחה קול חתן וקול כלה
             </p>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-              {wedding.partner1Name} <span className="text-amber-300">&amp;</span>{' '}
+            <h1
+              className="text-3xl font-bold tracking-tight sm:text-4xl"
+              style={{ fontFamily: 'var(--font-frank), serif' }}
+            >
+              {wedding.partner1Name} <span className="mx-1 font-normal opacity-80">&amp;</span>{' '}
               {wedding.partner2Name}
             </h1>
-            <p className="mt-2 text-sm text-stone-200">{wedding.themeConfig.heroSubtitle}</p>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-1.5 text-xs font-medium backdrop-blur-sm">
-              <Calendar className="h-3.5 w-3.5 text-amber-300" />
+            <p className="mt-2.5 text-xs leading-relaxed text-stone-200">
+              {wedding.themeConfig.heroSubtitle}
+            </p>
+            <div className="mt-4 inline-flex items-center gap-2 border-y border-white/25 px-5 py-1.5 text-xs font-semibold tracking-wide">
               {formattedEventDate}
             </div>
           </div>
         </div>
 
-        <div className="space-y-6 px-5 pt-6">
-          {/* Custom Couple Note */}
-          <div
-            className={`rounded-2xl border p-5 text-center shadow-sm ${
-              isMidnight
-                ? 'border-slate-700 bg-slate-800/80 text-slate-100'
-                : 'border-stone-200/80 bg-white/90 text-stone-700'
-            }`}
-          >
-            <Heart
-              className="mx-auto mb-2 h-5 w-5"
-              style={{ color: wedding.themeConfig.accentColor }}
-            />
-            <p className="text-sm leading-relaxed">
+        <div className="space-y-5 px-4 pt-6">
+          {/* Formal Couple Invitation Card */}
+          <div className={`rounded-xl border p-6 text-center shadow-xs ${cardClass}`}>
+            <p className="text-xs font-semibold text-stone-500">לכבוד</p>
+            <h2
+              className="mt-1 text-xl font-bold"
+              style={{
+                color: isMidnight ? '#f8fafc' : wedding.themeConfig.primaryColor,
+                fontFamily: 'var(--font-frank), serif',
+              }}
+            >
+              {guest.fullName}
+            </h2>
+            <div className="mx-auto my-3 h-px w-12 bg-stone-200" />
+            <p className="text-sm leading-relaxed opacity-90">
               {wedding.themeConfig.customInvitationMessage}
             </p>
           </div>
 
-          {/* Live Countdown Timer */}
+          {/* Minimalist Countdown */}
           {wedding.themeConfig.showCountdown && (
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-3 gap-2.5 text-center">
               {[
                 { label: dict.invitation.days, value: countdown.days },
                 { label: dict.invitation.hours, value: countdown.hours },
@@ -300,93 +280,85 @@ export function GuestInvitationView({
               ].map((item) => (
                 <div
                   key={item.label}
-                  className={`rounded-2xl border p-3.5 shadow-sm ${
-                    isMidnight
-                      ? 'border-slate-700 bg-slate-800 text-white'
-                      : 'border-stone-200 bg-white text-stone-900'
-                  }`}
+                  className={`rounded-xl border py-3 px-2 shadow-2xs ${cardClass}`}
                 >
                   <div
-                    className="text-2xl font-bold"
-                    style={{ color: wedding.themeConfig.primaryColor }}
+                    className="text-xl font-bold tabular-nums"
+                    style={{ color: isMidnight ? '#f8fafc' : wedding.themeConfig.primaryColor }}
                   >
                     {item.value}
                   </div>
-                  <div className="mt-0.5 text-xs opacity-75">{item.label}</div>
+                  <div className="mt-0.5 text-[11px] text-stone-500">{item.label}</div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Event Timeline & Venue Navigation */}
-          <div
-            className={`rounded-2xl border p-5 shadow-sm ${
-              isMidnight ? 'border-slate-700 bg-slate-800' : 'border-stone-200 bg-white'
-            }`}
-          >
-            <div className="grid grid-cols-2 gap-4 border-b border-stone-200/60 pb-4 dark:border-slate-700">
+          {/* Event Schedule & Verified Venue Navigation */}
+          <div className={`rounded-xl border p-5 shadow-xs ${cardClass}`}>
+            <div className="grid grid-cols-2 gap-4 border-b border-stone-200/70 pb-4">
               <div className="flex items-center gap-3">
                 <div
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-white"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white"
                   style={{ backgroundColor: wedding.themeConfig.primaryColor }}
                 >
-                  <Clock className="h-5 w-5" />
+                  <Clock className="h-4 w-4" />
                 </div>
                 <div>
-                  <div className="text-xs opacity-70">{dict.invitation.reception}</div>
-                  <div className="text-base font-bold">{wedding.receptionTime}</div>
+                  <div className="text-[11px] text-stone-500">{dict.invitation.reception}</div>
+                  <div className="text-sm font-bold tabular-nums">{wedding.receptionTime}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <div
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-white"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white"
                   style={{ backgroundColor: wedding.themeConfig.accentColor }}
                 >
-                  <Heart className="h-5 w-5" />
+                  <Clock className="h-4 w-4" />
                 </div>
                 <div>
-                  <div className="text-xs opacity-70">{dict.invitation.ceremony}</div>
-                  <div className="text-base font-bold">{wedding.ceremonyTime}</div>
+                  <div className="text-[11px] text-stone-500">{dict.invitation.ceremony}</div>
+                  <div className="text-sm font-bold tabular-nums">{wedding.ceremonyTime}</div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-4 flex items-start gap-3">
+            <div className="mt-4 flex items-start gap-2.5">
               <MapPin
-                className="mt-1 h-5 w-5 shrink-0"
+                className="mt-0.5 h-4 w-4 shrink-0"
                 style={{ color: wedding.themeConfig.primaryColor }}
               />
               <div>
-                <div className="font-bold">{wedding.venueName}</div>
-                <div className="text-xs opacity-75">{wedding.venueAddress}</div>
+                <div className="text-sm font-bold">{wedding.venueName}</div>
+                <div className="mt-0.5 text-xs text-stone-500">{wedding.venueAddress}</div>
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-3 gap-2 text-xs font-medium">
+            <div className="mt-4 grid grid-cols-3 gap-2 text-xs font-semibold">
               <a
                 href={wedding.wazeUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-sky-500 px-3 py-2.5 text-white shadow-sm transition hover:bg-sky-600"
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-stone-800 transition hover:bg-stone-100"
               >
-                <Navigation className="h-3.5 w-3.5" />
-                Waze
+                <Navigation className="h-3.5 w-3.5 text-sky-600" />
+                ניווט ב-Waze
               </a>
               <a
                 href={wedding.googleMapsUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2.5 text-white shadow-sm transition hover:bg-emerald-700"
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-stone-800 transition hover:bg-stone-100"
               >
-                <MapPin className="h-3.5 w-3.5" />
-                Maps
+                <MapPin className="h-3.5 w-3.5 text-emerald-700" />
+                מפות גוגל
               </a>
               <button
                 type="button"
                 onClick={handleDownloadIcs}
-                className="flex items-center justify-center gap-1.5 rounded-xl border border-stone-300 bg-stone-100 px-3 py-2.5 text-stone-800 transition hover:bg-stone-200"
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-stone-800 transition hover:bg-stone-100"
               >
-                <Calendar className="h-3.5 w-3.5" />
+                <Calendar className="h-3.5 w-3.5 text-stone-600" />
                 {dict.invitation.addToCalendar}
               </button>
             </div>
@@ -395,18 +367,12 @@ export function GuestInvitationView({
           {/* Personalized RSVP Form */}
           <form
             onSubmit={handleSubmitRsvp}
-            className={`rounded-2xl border p-5 shadow-md ${
-              isMidnight ? 'border-slate-700 bg-slate-800' : 'border-stone-200 bg-white'
-            }`}
+            className={`rounded-xl border p-5 shadow-xs ${cardClass}`}
           >
-            <div className="mb-4 text-center">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                <Users className="h-3.5 w-3.5" />
-                {guest.fullName}
-              </span>
-              <h2 className="mt-2 text-xl font-bold">{dict.invitation.rsvpTitle}</h2>
-              <p className="mt-1 text-xs opacity-75">
-                {dict.invitation.personalGreeting} <strong>{guest.maxInvitedCount}</strong>
+            <div className="mb-4 border-b border-stone-100 pb-3">
+              <h2 className="text-base font-bold">{dict.invitation.rsvpTitle}</h2>
+              <p className="mt-0.5 text-xs text-stone-500">
+                {dict.invitation.personalGreeting} <strong>{guest.maxInvitedCount}</strong> אורחים
               </p>
             </div>
 
@@ -414,18 +380,30 @@ export function GuestInvitationView({
             <div className="grid grid-cols-3 gap-2">
               {(
                 [
-                  { status: 'ATTENDING', label: dict.invitation.attending, activeBg: 'bg-emerald-600 text-white border-emerald-600' },
-                  { status: 'MAYBE', label: dict.invitation.maybe, activeBg: 'bg-amber-500 text-white border-amber-500' },
-                  { status: 'DECLINED', label: dict.invitation.declined, activeBg: 'bg-rose-600 text-white border-rose-600' },
+                  {
+                    status: 'ATTENDING',
+                    label: dict.invitation.attending,
+                    activeClass: 'border-emerald-700 bg-emerald-700 text-white',
+                  },
+                  {
+                    status: 'MAYBE',
+                    label: dict.invitation.maybe,
+                    activeClass: 'border-amber-700 bg-amber-700 text-white',
+                  },
+                  {
+                    status: 'DECLINED',
+                    label: dict.invitation.declined,
+                    activeClass: 'border-stone-800 bg-stone-800 text-white',
+                  },
                 ] as const
               ).map((option) => (
                 <button
                   key={option.status}
                   type="button"
                   onClick={() => setRsvpStatus(option.status)}
-                  className={`rounded-xl border px-2.5 py-3 text-xs font-semibold transition ${
+                  className={`rounded-lg border px-2.5 py-2.5 text-xs font-semibold transition ${
                     rsvpStatus === option.status
-                      ? option.activeBg
+                      ? option.activeClass
                       : 'border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100'
                   }`}
                 >
@@ -436,46 +414,52 @@ export function GuestInvitationView({
 
             {/* Headcount & Meal Preferences when Attending or Maybe */}
             {rsvpStatus !== 'DECLINED' && (
-              <div className="mt-5 space-y-4">
+              <div className="mt-4 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-stone-200 p-3 text-center">
-                    <div className="text-xs opacity-70">{dict.invitation.adultsCount}</div>
+                  <div className="rounded-lg border border-stone-200 p-3 text-center">
+                    <div className="text-xs font-medium text-stone-500">
+                      {dict.invitation.adultsCount}
+                    </div>
                     <div className="mt-2 flex items-center justify-center gap-3">
                       <button
                         type="button"
                         onClick={() => handleAdultChange(-1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 text-stone-800 font-bold"
+                        className="flex h-7 w-7 items-center justify-center rounded-md border border-stone-300 bg-stone-50 text-stone-800 font-bold"
                       >
                         -
                       </button>
-                      <span className="text-lg font-bold">{confirmedAdults}</span>
+                      <span className="w-5 text-base font-bold tabular-nums">{confirmedAdults}</span>
                       <button
                         type="button"
                         onClick={() => handleAdultChange(1)}
                         disabled={currentTotal >= maxAllowed}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-800 text-white font-bold disabled:opacity-30"
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-stone-900 text-white font-bold disabled:opacity-30"
                       >
                         +
                       </button>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-stone-200 p-3 text-center">
-                    <div className="text-xs opacity-70">{dict.invitation.childrenCount}</div>
+                  <div className="rounded-lg border border-stone-200 p-3 text-center">
+                    <div className="text-xs font-medium text-stone-500">
+                      {dict.invitation.childrenCount}
+                    </div>
                     <div className="mt-2 flex items-center justify-center gap-3">
                       <button
                         type="button"
                         onClick={() => handleChildChange(-1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 text-stone-800 font-bold"
+                        className="flex h-7 w-7 items-center justify-center rounded-md border border-stone-300 bg-stone-50 text-stone-800 font-bold"
                       >
                         -
                       </button>
-                      <span className="text-lg font-bold">{confirmedChildren}</span>
+                      <span className="w-5 text-base font-bold tabular-nums">
+                        {confirmedChildren}
+                      </span>
                       <button
                         type="button"
                         onClick={() => handleChildChange(1)}
                         disabled={currentTotal >= maxAllowed}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-800 text-white font-bold disabled:opacity-30"
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-stone-900 text-white font-bold disabled:opacity-30"
                       >
                         +
                       </button>
@@ -484,33 +468,35 @@ export function GuestInvitationView({
                 </div>
 
                 {/* Meal Preferences */}
-                <div className="rounded-xl border border-stone-200/80 p-3.5">
-                  <div className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold">
+                <div className="rounded-lg border border-stone-200 p-3.5">
+                  <div className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold text-stone-700">
                     <Utensils className="h-3.5 w-3.5" />
                     {dict.invitation.mealPreferences}
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    {(['regular', 'vegetarian', 'vegan', 'kids', 'glatt'] as const).map((mealKey) => (
-                      <div
-                        key={mealKey}
-                        className="flex items-center justify-between rounded-lg bg-stone-50 px-2.5 py-1.5 text-stone-800"
-                      >
-                        <span>{dict.invitation.meals[mealKey]}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={maxAllowed}
-                          value={meals[mealKey]}
-                          onChange={(e) =>
-                            setMeals((prev) => ({
-                              ...prev,
-                              [mealKey]: Math.max(0, Number(e.target.value) || 0),
-                            }))
-                          }
-                          className="w-12 rounded border border-stone-300 bg-white px-1.5 py-0.5 text-center font-semibold"
-                        />
-                      </div>
-                    ))}
+                    {(['regular', 'vegetarian', 'vegan', 'kids', 'glatt'] as const).map(
+                      (mealKey) => (
+                        <div
+                          key={mealKey}
+                          className="flex items-center justify-between rounded-md bg-stone-50 px-2.5 py-1.5 text-stone-800"
+                        >
+                          <span>{dict.invitation.meals[mealKey]}</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={maxAllowed}
+                            value={meals[mealKey]}
+                            onChange={(e) =>
+                              setMeals((prev) => ({
+                                ...prev,
+                                [mealKey]: Math.max(0, Number(e.target.value) || 0),
+                              }))
+                            }
+                            className="w-12 rounded border border-stone-300 bg-white px-1.5 py-0.5 text-center font-semibold tabular-nums"
+                          />
+                        </div>
+                      )
+                    )}
                   </div>
                 </div>
               </div>
@@ -521,15 +507,15 @@ export function GuestInvitationView({
               value={dietaryNotes}
               onChange={(e) => setDietaryNotes(e.target.value)}
               placeholder={dict.invitation.dietaryNotesPlaceholder}
-              className="mt-4 w-full rounded-xl border border-stone-200 bg-stone-50 p-3 text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none"
+              className="mt-4 w-full rounded-lg border border-stone-200 bg-stone-50 p-2.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none"
             />
 
             {rsvpError && (
               <p className="mt-2 text-center text-xs font-medium text-rose-600">{rsvpError}</p>
             )}
             {rsvpSuccess && (
-              <div className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-800">
-                <CheckCircle2 className="h-4 w-4" />
+              <div className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-900">
+                <Check className="h-4 w-4" />
                 {dict.invitation.rsvpSaved}
               </div>
             )}
@@ -538,44 +524,38 @@ export function GuestInvitationView({
               type="submit"
               disabled={submittingRsvp}
               style={{ backgroundColor: wedding.themeConfig.primaryColor }}
-              className="mt-4 w-full rounded-xl py-3 text-sm font-bold text-white shadow-md transition hover:opacity-95 disabled:opacity-50"
+              className="mt-4 w-full rounded-lg py-2.5 text-sm font-bold text-white shadow-xs transition hover:opacity-95 disabled:opacity-50"
             >
-              {submittingRsvp ? '...' : dict.invitation.submitRsvp}
+              {submittingRsvp ? 'שומר...' : dict.invitation.submitRsvp}
             </button>
           </form>
 
-          {/* Express Reception QR Pass & Assigned Table */}
+          {/* Reception QR Pass & Assigned Table */}
           {rsvpStatus === 'ATTENDING' && (
-            <div
-              className={`rounded-2xl border p-5 text-center shadow-sm ${
-                isMidnight ? 'border-slate-700 bg-slate-800' : 'border-stone-200 bg-white'
-              }`}
-            >
-              <div className="mb-1 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+            <div className={`rounded-xl border p-5 text-center shadow-xs ${cardClass}`}>
+              <div className="mb-1 inline-flex items-center gap-1.5 text-xs font-bold text-stone-800">
                 <QrCode className="h-4 w-4" />
                 {dict.invitation.qrPassTitle}
               </div>
-              <p className="text-xs opacity-75">{dict.invitation.qrPassSubtitle}</p>
+              <p className="text-xs text-stone-500">{dict.invitation.qrPassSubtitle}</p>
 
-              <div className="my-4 inline-block rounded-2xl border border-stone-200 bg-white p-4 shadow-inner">
+              <div className="my-4 inline-block rounded-xl border border-stone-200 bg-white p-3.5">
                 <QRCodeSVG
                   value={`WEDDING_CHECKIN:${guest.invitation.shortCode}`}
-                  size={148}
+                  size={136}
                   level="M"
                 />
               </div>
 
-              <div className="flex items-center justify-center gap-4 text-xs">
-                <div className="rounded-xl bg-amber-50 px-3.5 py-2 text-amber-900">
-                  <span className="block text-[10px] uppercase opacity-75">
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-stone-900">
+                  <span className="block text-[11px] text-stone-500">
                     {dict.invitation.assignedTable}
                   </span>
-                  <strong className="text-sm">
-                    {guest.tableName || 'יפורסם ביום האירוע / TBA'}
-                  </strong>
+                  <strong className="text-sm">{guest.tableName || 'יימסר בכניסה לאולם'}</strong>
                 </div>
-                <div className="rounded-xl bg-stone-100 px-3.5 py-2 text-stone-800">
-                  <span className="block text-[10px] uppercase opacity-75">Code</span>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-stone-900">
+                  <span className="block text-[11px] text-stone-500">קוד הזמנה</span>
                   <strong className="font-mono text-sm">{guest.invitation.shortCode}</strong>
                 </div>
               </div>
@@ -584,25 +564,20 @@ export function GuestInvitationView({
 
           {/* Digital Wedding Gift Links */}
           {wedding.themeConfig.showGiftLinks && (
-            <div
-              className={`rounded-2xl border p-5 text-center shadow-sm ${
-                isMidnight ? 'border-slate-700 bg-slate-800' : 'border-stone-200 bg-white'
-              }`}
-            >
-              <Gift
-                className="mx-auto mb-2 h-6 w-6"
-                style={{ color: wedding.themeConfig.accentColor }}
-              />
-              <h3 className="text-base font-bold">{dict.invitation.giftSectionTitle}</h3>
-              <p className="mt-1 text-xs opacity-75">{dict.invitation.giftSectionSubtitle}</p>
+            <div className={`rounded-xl border p-5 text-center shadow-xs ${cardClass}`}>
+              <div className="flex items-center justify-center gap-1.5 text-sm font-bold">
+                <Gift className="h-4 w-4 text-stone-700" />
+                <h3>{dict.invitation.giftSectionTitle}</h3>
+              </div>
+              <p className="mt-1 text-xs text-stone-500">{dict.invitation.giftSectionSubtitle}</p>
 
-              <div className="mt-4 grid grid-cols-2 gap-2.5 text-xs font-semibold">
+              <div className="mt-3.5 grid grid-cols-2 gap-2.5 text-xs font-semibold">
                 {wedding.giftConfig.bitUrl && (
                   <a
                     href={wedding.giftConfig.bitUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-xl bg-cyan-600 py-2.5 text-white shadow-sm hover:bg-cyan-700"
+                    className="rounded-lg border border-stone-300 bg-stone-900 py-2.5 text-white transition hover:bg-stone-800"
                   >
                     {dict.invitation.bitButton}
                   </a>
@@ -612,34 +587,24 @@ export function GuestInvitationView({
                     href={wedding.giftConfig.payboxUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-xl bg-indigo-600 py-2.5 text-white shadow-sm hover:bg-indigo-700"
+                    className="rounded-lg border border-stone-300 bg-white py-2.5 text-stone-900 transition hover:bg-stone-50"
                   >
                     {dict.invitation.payboxButton}
                   </a>
                 )}
               </div>
               {wedding.giftConfig.bankDetails && (
-                <p className="mt-3 rounded-lg bg-stone-100 p-2 text-[11px] text-stone-700">
+                <p className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-2.5 text-xs text-stone-700">
                   {wedding.giftConfig.bankDetails}
                 </p>
               )}
             </div>
           )}
 
-          {/* Couple's Greeting Wall */}
+          {/* Couple's Greeting Book */}
           {wedding.themeConfig.showGreetingWall && (
-            <div
-              className={`rounded-2xl border p-5 shadow-sm ${
-                isMidnight ? 'border-slate-700 bg-slate-800' : 'border-stone-200 bg-white'
-              }`}
-            >
-              <div className="mb-3 flex items-center gap-2">
-                <MessageSquareHeart
-                  className="h-5 w-5"
-                  style={{ color: wedding.themeConfig.primaryColor }}
-                />
-                <h3 className="text-base font-bold">{dict.invitation.greetingWallTitle}</h3>
-              </div>
+            <div className={`rounded-xl border p-5 shadow-xs ${cardClass}`}>
+              <h3 className="mb-3 text-sm font-bold">{dict.invitation.greetingWallTitle}</h3>
 
               <form onSubmit={handlePostBlessing} className="space-y-2.5 text-xs">
                 <div className="grid grid-cols-2 gap-2">
@@ -663,31 +628,30 @@ export function GuestInvitationView({
                   value={blessingText}
                   onChange={(e) => setBlessingText(e.target.value)}
                   placeholder={dict.invitation.yourBlessing}
-                  className="w-full rounded-lg border border-stone-200 bg-stone-50 p-3 text-stone-900"
+                  className="w-full rounded-lg border border-stone-200 bg-stone-50 p-2.5 text-stone-900"
                 />
                 <button
                   type="submit"
-                  style={{ backgroundColor: wedding.themeConfig.accentColor }}
-                  className="w-full rounded-xl py-2.5 font-semibold text-white shadow-sm hover:opacity-95"
+                  className="w-full rounded-lg border border-stone-300 bg-stone-900 py-2 font-semibold text-white transition hover:bg-stone-800"
                 >
                   {dict.invitation.sendBlessing}
                 </button>
                 {blessingSaved && (
-                  <p className="text-center text-emerald-600 font-medium">✨ תודה על הברכה!</p>
+                  <p className="text-center font-medium text-emerald-700">הברכה נשמרה בספר האורחים</p>
                 )}
               </form>
 
               {greetings.length > 0 && (
-                <div className="mt-4 space-y-2.5 border-t border-stone-200/70 pt-4">
+                <div className="mt-4 space-y-2 border-t border-stone-200 pt-3.5">
                   {greetings.slice(0, isPreview ? 2 : 8).map((gr) => (
                     <div
                       key={gr.id}
-                      className="rounded-xl bg-stone-50/90 p-3 text-xs text-stone-800"
+                      className="rounded-lg border border-stone-100 bg-stone-50 p-3 text-xs text-stone-800"
                     >
                       <div className="flex items-center justify-between font-bold">
                         <span>{gr.authorName}</span>
                         {gr.relationship && (
-                          <span className="text-[10px] font-normal text-stone-500">
+                          <span className="text-[11px] font-normal text-stone-500">
                             {gr.relationship}
                           </span>
                         )}
