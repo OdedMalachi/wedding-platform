@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 COPY wedding-api/package.json ./wedding-api/
 COPY wedding-web/package.json ./wedding-web/
 
-RUN npm ci --workspace=wedding-api --include-workspace-root
+RUN npm install --workspace=wedding-api --include-workspace-root
 
 COPY wedding-api ./wedding-api
 
