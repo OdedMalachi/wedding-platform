@@ -2,8 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { Sparkles } from 'lucide-react';
+import { Heart, Sparkles } from 'lucide-react';
 import type { Greeting, Guest, Wedding } from '@/types/wedding';
 import { GuestInvitationView } from '@/components/invitation/GuestInvitationView';
 
@@ -37,7 +36,7 @@ export default function PublicInvitationPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-900 text-white">
+      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-stone-900 text-white">
         <div className="flex items-center gap-2.5 text-sm">
           <Sparkles className="h-5 w-5 animate-spin text-amber-400" />
           טוען הזמנה אישית...
@@ -48,19 +47,16 @@ export default function PublicInvitationPage() {
 
   if (notFound || !data) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-stone-100 p-6 text-center">
-        <div className="max-w-md rounded-2xl bg-white p-8 shadow-lg">
-          <h1 className="text-2xl font-bold text-stone-900">Invitation Not Found</h1>
-          <p className="mt-2 text-sm text-stone-600">
-            The invitation code <code className="font-mono font-semibold">{code}</code> does not
-            match an active guest record.
+      <div dir="rtl" className="flex min-h-screen flex-col items-center justify-center bg-stone-100 p-6 text-center">
+        <div className="max-w-md rounded-3xl border border-stone-200 bg-white p-8 shadow-lg">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-800">
+            <Heart className="h-6 w-6" />
+          </div>
+          <h1 className="text-xl font-bold text-stone-900">ההזמנה לא נמצאה</h1>
+          <p className="mt-2 text-xs leading-relaxed text-stone-600">
+            קוד ההזמנה <code className="font-mono font-semibold">{code}</code> אינו תואם להזמנה פעילה.
+            אנא ודאו שנכנסתם דרך הקישור המלא שנשלח אליכם בהודעת הוואטסאפ מהזוג.
           </p>
-          <Link
-            href="/"
-            className="mt-6 inline-block rounded-xl bg-amber-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-800"
-          >
-            Go to Organizer Dashboard
-          </Link>
         </div>
       </div>
     );

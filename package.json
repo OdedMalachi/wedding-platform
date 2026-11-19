@@ -11,7 +11,9 @@
     "dev": "node scripts/dev-all.mjs",
     "dev:api": "npm --prefix wedding-api run dev",
     "dev:web": "npm --prefix wedding-web run dev",
+    "build": "npm --prefix wedding-web run build",
     "build:web": "npm --prefix wedding-web run build",
+    "start": "node scripts/start-prod.mjs",
     "typecheck:api": "npm --prefix wedding-api run typecheck",
     "typecheck:web": "npm --prefix wedding-web run typecheck",
     "test:api": "npm --prefix wedding-api run test"

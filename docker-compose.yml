@@ -6,14 +6,57 @@ services:
     container_name: wedding-platform-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: wedding_admin
-      POSTGRES_PASSWORD: wedding_secret_password
-      POSTGRES_DB: wedding_platform
+      POSTGRES_USER: ${POSTGRES_USER:-wedding_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wedding_secret_password}
+      POSTGRES_DB: ${POSTGRES_DB:-wedding_platform}
     ports:
       - '5432:5432'
     volumes:
       - wedding_pgdata:/var/lib/postgresql/data
       - ./wedding-api/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-wedding_admin} -d $${POSTGRES_DB:-wedding_platform}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  wedding-api:
+    build:
+      context: .
+      dockerfile: wedding-api/Dockerfile
+    container_name: wedding-platform-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wedding_admin}:${POSTGRES_PASSWORD:-wedding_secret_password}@postgres:5432/${POSTGRES_DB:-wedding_platform}
+      DATABASE_SSL: 'false'
+      JWT_SECRET: ${JWT_SECRET:-change-this-production-jwt-secret-immediately}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-http://localhost:3000}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+    ports:
+      - '4000:4000'
+
+  wedding-web:
+    build:
+      context: .
+      dockerfile: wedding-web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://wedding-api:4000}
+    container_name: wedding-platform-web
+    restart: unless-stopped
+    depends_on:
+      - wedding-api
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://wedding-api:4000}
+    ports:
+      - '3000:3000'
 
 volumes:
   wedding_pgdata:

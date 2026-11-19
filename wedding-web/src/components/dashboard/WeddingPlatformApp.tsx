@@ -8,15 +8,18 @@ import {
   CheckCircle2,
   Copy,
   Download,
+  Edit3,
   ExternalLink,
   FileSpreadsheet,
   Gift,
   Globe,
   Heart,
+  ImagePlus,
   LayoutGrid,
+  Lock,
+  LogOut,
   MessageCircle,
   Palette,
-  Plus,
   QrCode,
   Search,
   Send,
@@ -38,6 +41,7 @@ import type {
   RsvpStatus,
   SeatAssignment,
   SeatingTable,
+  User,
   Wedding,
   WeddingSide,
   WeddingStatistics,
@@ -57,6 +61,8 @@ type DashboardTab =
   | 'seating'
   | 'checkin'
   | 'greetings';
+
+const TOKEN_STORAGE_KEY = 'wedding_platform_auth_token';
 
 const TEMPLATE_PRESETS: Record<
   InvitationTemplateId,
@@ -102,11 +108,53 @@ const TEMPLATE_PRESETS: Record<
   },
 };
 
+async function compressImageFile(file: File, maxWidth = 1200, quality = 0.82): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(reader.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = reader.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export function WeddingPlatformApp() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [uiLocale, setUiLocale] = useState<Locale>('he');
   const dict = DICTIONARIES[uiLocale];
 
+  // Auth State
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authFullName, setAuthFullName] = useState('');
+  const [regPartner1, setRegPartner1] = useState('');
+  const [regPartner2, setRegPartner2] = useState('');
+  const [regDate, setRegDate] = useState('2026-11-24');
+  const [regVenue, setRegVenue] = useState('');
+  const [regAddress, setRegAddress] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Wedding Data State
   const [allWeddings, setAllWeddings] = useState<Wedding[]>([]);
   const [wedding, setWedding] = useState<Wedding | null>(null);
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -116,7 +164,8 @@ export function WeddingPlatformApp() {
   const [greetings, setGreetings] = useState<Greeting[]>([]);
   const [messageLogs, setMessageLogs] = useState<MessageLog[]>([]);
   const [statistics, setStatistics] = useState<WeddingStatistics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [whatsappCloudConfigured, setWhatsappCloudConfigured] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   // Guest filtering & creation state
@@ -132,6 +181,18 @@ export function WeddingPlatformApp() {
   const [csvText, setCsvText] = useState(
     'Full Name,Phone,Max Invited,Group,Side,Notes\nמשפחת אלמוג,054-9123456,3,משפחה קרובה,PARTNER_1,צמחונים\nעמית וירדן גולן,052-8234567,2,חברים מהאוניברסיטה,PARTNER_2,'
   );
+
+  // Guest Edit Modal State
+  const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
+  const [editGuestName, setEditGuestName] = useState('');
+  const [editGuestPhone, setEditGuestPhone] = useState('');
+  const [editGuestMax, setEditGuestMax] = useState(2);
+  const [editGuestGroup, setEditGuestGroup] = useState('');
+  const [editGuestSide, setEditGuestSide] = useState<WeddingSide>('BOTH');
+  const [editGuestRsvp, setEditGuestRsvp] = useState<RsvpStatus>('PENDING');
+  const [editGuestAdults, setEditGuestAdults] = useState(0);
+  const [editGuestChildren, setEditGuestChildren] = useState(0);
+  const [editGuestDietary, setEditGuestDietary] = useState('');
 
   // New wedding modal state
   const [showNewWeddingModal, setShowNewWeddingModal] = useState(false);
@@ -164,56 +225,175 @@ export function WeddingPlatformApp() {
 
   const [apiError, setApiError] = useState<string | null>(null);
 
-  const fetchWeddingBundle = useCallback(async (weddingId?: string) => {
-    setLoading(true);
-    setApiError(null);
-    try {
-      const url = weddingId
-        ? `/api/weddings?weddingId=${encodeURIComponent(weddingId)}`
-        : '/api/weddings';
-      const res = await fetch(url);
-      const text = await res.text();
-      let data: Record<string, any> = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        throw new Error(
-          'Backend API server (wedding-api on port 4000) is not reachable. Run "npm run dev" from the root folder to start both wedding-api and wedding-web.'
-        );
-      }
-      if (!res.ok) {
-        throw new Error(data.error || `API Error (${res.status})`);
-      }
-      setAllWeddings(data.allWeddings || []);
-      setWedding(data.wedding);
-      setGuests(data.guests || []);
-      setGroups(data.groups || []);
-      setTables(data.tables || []);
-      setAssignments(data.assignments || []);
-      setGreetings(data.greetings || []);
-      setMessageLogs(data.messageLogs || []);
-      setStatistics(data.statistics || null);
-      if (data.wedding) {
-        setCustomTemplate(
-          getDefaultCampaignTemplate('INITIAL_INVITATION', data.wedding.defaultLocale)
-        );
-      }
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to connect to wedding-api');
-    } finally {
-      setLoading(false);
+  const apiFetch = useCallback(async (input: string, init?: RequestInit) => {
+    const token =
+      typeof window !== 'undefined' ? window.localStorage.getItem(TOKEN_STORAGE_KEY) : null;
+    const headers = new Headers(init?.headers || {});
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
     }
+    return fetch(input, {
+      ...init,
+      headers,
+      credentials: 'include',
+    });
   }, []);
 
+  const fetchWeddingBundle = useCallback(
+    async (weddingId?: string) => {
+      setLoading(true);
+      setApiError(null);
+      try {
+        const url = weddingId
+          ? `/api/weddings?weddingId=${encodeURIComponent(weddingId)}`
+          : '/api/weddings';
+        const res = await apiFetch(url);
+        if (res.status === 401) {
+          setAuthUser(null);
+          return;
+        }
+        const text = await res.text();
+        let data: Record<string, any> = {};
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error(
+            'Backend API server (wedding-api on port 4000) is not reachable. Run "npm run dev" from the root folder to start both wedding-api and wedding-web.'
+          );
+        }
+        if (!res.ok) {
+          throw new Error(data.error || `API Error (${res.status})`);
+        }
+        setAllWeddings(data.allWeddings || []);
+        setWedding(data.wedding);
+        setGuests(data.guests || []);
+        setGroups(data.groups || []);
+        setTables(data.tables || []);
+        setAssignments(data.assignments || []);
+        setGreetings(data.greetings || []);
+        setMessageLogs(data.messageLogs || []);
+        setStatistics(data.statistics || null);
+        setWhatsappCloudConfigured(Boolean(data.whatsappCloudConfigured));
+        if (data.wedding) {
+          setCustomTemplate(
+            getDefaultCampaignTemplate('INITIAL_INVITATION', data.wedding.defaultLocale)
+          );
+        }
+      } catch (err) {
+        setApiError(err instanceof Error ? err.message : 'Failed to connect to wedding-api');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [apiFetch]
+  );
+
+  // Check session on startup
   useEffect(() => {
-    fetchWeddingBundle();
-  }, [fetchWeddingBundle]);
+    let active = true;
+    apiFetch('/api/auth/me')
+      .then(async (res) => {
+        if (!active) return;
+        if (res.ok) {
+          const data = await res.json();
+          setAuthUser(data.user);
+          await fetchWeddingBundle();
+        }
+      })
+      .catch(() => {
+        // User not logged in or backend offline
+      })
+      .finally(() => {
+        if (active) setAuthChecking(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, fetchWeddingBundle]);
 
   useEffect(() => {
     if (wedding) {
       setCustomTemplate(getDefaultCampaignTemplate(campaignType, wedding.defaultLocale));
     }
   }, [campaignType, wedding]);
+
+  const handleLoginSubmit = async (e: React.FormEvent, overrideEmail?: string, overridePass?: string) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSubmitting(true);
+    try {
+      const res = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: overrideEmail ?? authEmail,
+          password: overridePass ?? authPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'שגיאה בהתחברות');
+      }
+      if (data.token && typeof window !== 'undefined') {
+        window.localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+      }
+      setAuthUser(data.user);
+      await fetchWeddingBundle();
+      showNotification(`ברוכים הבאים, ${data.user.fullName}!`);
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'שגיאה בהתחברות');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSubmitting(true);
+    try {
+      const res = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: authEmail,
+          password: authPassword,
+          fullName: authFullName || `${regPartner1} & ${regPartner2}`,
+          partner1Name: regPartner1,
+          partner2Name: regPartner2,
+          eventDate: regDate,
+          venueName: regVenue,
+          venueAddress: regAddress || regVenue,
+          defaultLocale: 'he',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'שגיאה בהרשמה');
+      }
+      if (data.token && typeof window !== 'undefined') {
+        window.localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+      }
+      setAuthUser(data.user);
+      await fetchWeddingBundle(data.wedding?.id);
+      showNotification('החשבון והאירוע שלכם נוצרו בהצלחה! 🎉');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'שגיאה בהרשמה');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+    setAuthUser(null);
+    setWedding(null);
+    setAllWeddings([]);
+    setGuests([]);
+  };
 
   const filteredGuests = useMemo(() => {
     return guests.filter((g) => {
@@ -232,7 +412,7 @@ export function WeddingPlatformApp() {
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!wedding || !newGuestName.trim() || !newGuestPhone.trim()) return;
-    const res = await fetch('/api/guests', {
+    const res = await apiFetch('/api/guests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -255,9 +435,51 @@ export function WeddingPlatformApp() {
     }
   };
 
+  const openEditGuestModal = (g: Guest) => {
+    setEditingGuest(g);
+    setEditGuestName(g.fullName);
+    setEditGuestPhone(g.phoneE164);
+    setEditGuestMax(g.maxInvitedCount);
+    setEditGuestGroup(g.groupName);
+    setEditGuestSide(g.side);
+    setEditGuestRsvp(g.invitation.rsvpStatus);
+    setEditGuestAdults(g.invitation.confirmedAdults);
+    setEditGuestChildren(g.invitation.confirmedChildren);
+    setEditGuestDietary(g.invitation.guestDietaryNotes || '');
+  };
+
+  const handleSaveEditedGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!wedding || !editingGuest) return;
+    const res = await apiFetch('/api/guests', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guestId: editingGuest.id,
+        fullName: editGuestName,
+        phone: editGuestPhone,
+        maxInvitedCount: editGuestMax,
+        groupName: editGuestGroup,
+        side: editGuestSide,
+        rsvpStatus: editGuestRsvp,
+        confirmedAdults: editGuestAdults,
+        confirmedChildren: editGuestChildren,
+        guestDietaryNotes: editGuestDietary,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setEditingGuest(null);
+      await fetchWeddingBundle(wedding.id);
+      showNotification(`עודכנו פרטי המוזמן: ${data.guest.fullName}`);
+    } else {
+      showNotification(data.error || 'שגיאה בעדכון מוזמן');
+    }
+  };
+
   const handleImportCsv = async () => {
     if (!wedding || !csvText.trim()) return;
-    const res = await fetch('/api/guests', {
+    const res = await apiFetch('/api/guests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -271,12 +493,14 @@ export function WeddingPlatformApp() {
       setShowCsvModal(false);
       await fetchWeddingBundle(wedding.id);
       showNotification(`יובאו בהצלחה ${data.importedCount} רשומות מוזמנים!`);
+    } else {
+      showNotification(data.error || 'שגיאה בייבוא CSV');
     }
   };
 
   const handleDeleteGuest = async (guestId: string) => {
     if (!wedding) return;
-    await fetch(`/api/guests?guestId=${encodeURIComponent(guestId)}`, { method: 'DELETE' });
+    await apiFetch(`/api/guests?guestId=${encodeURIComponent(guestId)}`, { method: 'DELETE' });
     await fetchWeddingBundle(wedding.id);
     showNotification('המוזמן הוסר מהרשימה');
   };
@@ -284,7 +508,7 @@ export function WeddingPlatformApp() {
   const handleCreateWedding = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nwPartner1.trim() || !nwPartner2.trim() || !nwVenue.trim()) return;
-    const res = await fetch('/api/weddings', {
+    const res = await apiFetch('/api/weddings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -310,7 +534,7 @@ export function WeddingPlatformApp() {
 
   const handleSaveWeddingSettings = async () => {
     if (!wedding) return;
-    const res = await fetch('/api/weddings', {
+    const res = await apiFetch('/api/weddings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(wedding),
@@ -318,13 +542,34 @@ export function WeddingPlatformApp() {
     if (res.ok) {
       showNotification('הגדרות העיצוב והאירוע נשמרו בהצלחה ✨');
       await fetchWeddingBundle(wedding.id);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showNotification(data.error || 'שגיאה בשמירת הגדרות האירוע');
+    }
+  };
+
+  const handleCoverPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !wedding) return;
+    try {
+      const dataUrl = await compressImageFile(file);
+      setWedding({
+        ...wedding,
+        themeConfig: {
+          ...wedding.themeConfig,
+          coverImageUrl: dataUrl,
+        },
+      });
+      showNotification('התמונה נטענה! לחצו על "שמירת שינויים" לעדכון ההזמנה החיה.');
+    } catch {
+      showNotification('שגיאה בטעינת קובץ התמונה');
     }
   };
 
   const handleAssignTable = async (guestId: string, tableId: string | null) => {
     if (!wedding) return;
     setSeatingError(null);
-    const res = await fetch('/api/seating', {
+    const res = await apiFetch('/api/seating', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -346,7 +591,7 @@ export function WeddingPlatformApp() {
   const handleCreateTable = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!wedding || !newTableName.trim()) return;
-    const res = await fetch('/api/seating', {
+    const res = await apiFetch('/api/seating', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -365,10 +610,39 @@ export function WeddingPlatformApp() {
     }
   };
 
+  const handleDeleteTable = async (tableId: string) => {
+    if (!wedding) return;
+    const res = await apiFetch('/api/seating', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'delete_table',
+        weddingId: wedding.id,
+        tableId,
+      }),
+    });
+    if (res.ok) {
+      await fetchWeddingBundle(wedding.id);
+      showNotification('השולחן הוסר מסידור ההושבה');
+    }
+  };
+
+  const handleDeleteGreeting = async (greetingId: string) => {
+    if (!wedding) return;
+    const res = await apiFetch(
+      `/api/greetings?weddingId=${encodeURIComponent(wedding.id)}&greetingId=${encodeURIComponent(greetingId)}`,
+      { method: 'DELETE' }
+    );
+    if (res.ok) {
+      await fetchWeddingBundle(wedding.id);
+      showNotification('הברכה הוסרה מהקיר');
+    }
+  };
+
   const handleCheckInToggle = async (guest: Guest) => {
     if (!wedding) return;
     const nextState = !guest.invitation.checkedIn;
-    await fetch('/api/checkin', {
+    await apiFetch('/api/checkin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -397,7 +671,7 @@ export function WeddingPlatformApp() {
       baseUrl,
     });
 
-    await fetch('/api/messages', {
+    const res = await apiFetch('/api/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -408,6 +682,11 @@ export function WeddingPlatformApp() {
         renderedMessage,
       }),
     });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      showNotification(errData.error || 'שגיאה בשליחת הודעה');
+      return;
+    }
 
     if (channel === 'WHATSAPP_LINK' && typeof window !== 'undefined') {
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
@@ -420,6 +699,8 @@ export function WeddingPlatformApp() {
     if (!wedding || targetGuests.length === 0) return;
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
+    let sentCount = 0;
+    let lastError: string | null = null;
     for (const guest of targetGuests) {
       const { renderedMessage } = buildWhatsAppInvitationLink({
         template: customTemplate,
@@ -427,7 +708,7 @@ export function WeddingPlatformApp() {
         guest,
         baseUrl,
       });
-      await fetch('/api/messages', {
+      const res = await apiFetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -438,9 +719,21 @@ export function WeddingPlatformApp() {
           renderedMessage,
         }),
       });
+      if (res.ok) {
+        sentCount++;
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        lastError = errData.error || `HTTP ${res.status}`;
+      }
     }
     await fetchWeddingBundle(wedding.id);
-    showNotification(`נשלחו ${targetGuests.length} הודעות דרך WhatsApp Business API!`);
+    if (sentCount === 0 && lastError) {
+      showNotification(lastError);
+    } else if (lastError) {
+      showNotification(`נשלחו ${sentCount} הודעות (חלק נכשלו: ${lastError})`);
+    } else {
+      showNotification(`נשלחו ${sentCount} הודעות בהצלחה! ✨`);
+    }
   };
 
   const handleExportSeatingCsv = () => {
@@ -463,12 +756,220 @@ export function WeddingPlatformApp() {
     URL.revokeObjectURL(url);
   };
 
+  if (authChecking) {
+    return (
+      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-stone-50 text-stone-600">
+        <div className="flex items-center gap-3 text-sm font-medium">
+          <Sparkles className="h-5 w-5 animate-spin text-amber-600" />
+          טוען מערכת ניהול חתונות...
+        </div>
+      </div>
+    );
+  }
+
+  // AUTHENTICATION PORTAL FOR REAL USERS (LOGIN / REGISTER)
+  if (!authUser) {
+    return (
+      <div
+        dir="rtl"
+        className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-stone-900 via-stone-800 to-amber-950 p-4 text-stone-900"
+      >
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white p-7 shadow-2xl">
+          <div className="text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-600 to-amber-800 text-white shadow-md">
+              <Heart className="h-6 w-6" />
+            </div>
+            <h1 className="mt-3 text-2xl font-bold text-stone-900">Wedding Platform 💍</h1>
+            <p className="mt-1 text-xs text-stone-500">
+              פלטפורמת הזמנות דיגיטליות, ניהול מוזמנים ואישורי הגעה בוואטסאפ
+            </p>
+          </div>
+
+          {/* Mode Switcher */}
+          <div className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-stone-100 p-1 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError(null);
+              }}
+              className={`rounded-xl py-2.5 transition ${
+                authMode === 'login' ? 'bg-white text-amber-900 shadow-xs' : 'text-stone-600'
+              }`}
+            >
+              התחברות לזוגות
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('register');
+                setAuthError(null);
+              }}
+              className={`rounded-xl py-2.5 transition ${
+                authMode === 'register' ? 'bg-white text-amber-900 shadow-xs' : 'text-stone-600'
+              }`}
+            >
+              הרשמה ופתיחת אירוע
+            </button>
+          </div>
+
+          {authError && (
+            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-center text-xs font-semibold text-rose-700">
+              {authError}
+            </div>
+          )}
+
+          {authMode === 'login' ? (
+            <form onSubmit={handleLoginSubmit} className="mt-5 space-y-3.5 text-xs">
+              <div>
+                <label className="font-semibold text-stone-700">כתובת אימייל</label>
+                <input
+                  type="email"
+                  required
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="couple@example.com"
+                  dir="ltr"
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-stone-900"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-stone-700">סיסמה</label>
+                <input
+                  type="password"
+                  required
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="••••••••"
+                  dir="ltr"
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-stone-900"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={authSubmitting}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-700 py-3 text-sm font-bold text-white shadow-md transition hover:bg-amber-800 disabled:opacity-50"
+              >
+                <Lock className="h-4 w-4" />
+                {authSubmitting ? 'מתחבר...' : 'כניסה למערכת הניהול'}
+              </button>
+
+              <div className="relative py-2 text-center">
+                <span className="bg-white px-2 text-[11px] text-stone-400">או לבדיקה מהירה</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => handleLoginSubmit(e, 'demo@wedding.co.il', 'Wedding2026!')}
+                className="w-full rounded-xl border border-amber-300 bg-amber-50 py-2.5 text-xs font-bold text-amber-900 transition hover:bg-amber-100"
+              >
+                ✨ כניסה מהירה לחשבון הדגמה (דנה ועומר)
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegisterSubmit} className="mt-5 space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="font-semibold text-stone-700">שם כלה / בן זוג 1</label>
+                  <input
+                    type="text"
+                    required
+                    value={regPartner1}
+                    onChange={(e) => setRegPartner1(e.target.value)}
+                    placeholder="למשל: נועה כהן"
+                    className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-stone-700">שם חתן / בן זוג 2</label>
+                  <input
+                    type="text"
+                    required
+                    value={regPartner2}
+                    onChange={(e) => setRegPartner2(e.target.value)}
+                    placeholder="למשל: איתי לוי"
+                    className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="font-semibold text-stone-700">תאריך החתונה</label>
+                  <input
+                    type="date"
+                    required
+                    value={regDate}
+                    onChange={(e) => setRegDate(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-stone-700">שם האולם / גן האירועים</label>
+                  <input
+                    type="text"
+                    required
+                    value={regVenue}
+                    onChange={(e) => setRegVenue(e.target.value)}
+                    placeholder="למשל: חוות רונית"
+                    className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="font-semibold text-stone-700">כתובת האולם</label>
+                <input
+                  type="text"
+                  value={regAddress}
+                  onChange={(e) => setRegAddress(e.target.value)}
+                  placeholder="למשל: קיבוץ שפיים / השרון"
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-stone-700">אימייל להתחברות</label>
+                <input
+                  type="email"
+                  required
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="noa.itay@example.com"
+                  dir="ltr"
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-stone-700">סיסמה (לפחות 6 תווים)</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="••••••••"
+                  dir="ltr"
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={authSubmitting}
+                className="mt-2 w-full rounded-xl bg-amber-700 py-3 text-sm font-bold text-white shadow-md transition hover:bg-amber-800 disabled:opacity-50"
+              >
+                {authSubmitting ? 'יוצר חשבון ואירוע...' : 'פתיחת חשבון ויצירת הזמנה 💍'}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (loading && !wedding) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-50 text-stone-600">
         <div className="flex items-center gap-3 text-sm font-medium">
           <Sparkles className="h-5 w-5 animate-spin text-amber-600" />
-          טוען מערכת ניהול חתונות...
+          טוען את נתוני החתונה שלכם...
         </div>
       </div>
     );
@@ -478,91 +979,30 @@ export function WeddingPlatformApp() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-100 p-6">
         <div className="max-w-md rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-lg">
-          <h2 className="text-lg font-bold text-rose-700">Backend Connection Error</h2>
+          <h2 className="text-lg font-bold text-rose-700">שגיאת תקשורת לשרת</h2>
           <p className="mt-2 text-xs leading-relaxed text-stone-600">{apiError}</p>
-          <button
-            type="button"
-            onClick={() => fetchWeddingBundle()}
-            className="mt-4 rounded-xl bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800"
-          >
-            נסה שוב (Retry)
-          </button>
+          <div className="mt-4 flex justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => fetchWeddingBundle()}
+              className="rounded-xl bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800"
+            >
+              נסה שוב (Retry)
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-stone-200 px-4 py-2 text-xs font-semibold text-stone-700"
+            >
+              התנתקות
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!wedding || !statistics) {
-    return (
-      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-stone-100 p-6">
-        <form
-          onSubmit={handleCreateWedding}
-          className="w-full max-w-md rounded-3xl border border-stone-200 bg-white p-8 shadow-lg space-y-3 text-xs"
-        >
-          <div className="text-center">
-            <Heart className="mx-auto h-10 w-10 text-amber-600" />
-            <h2 className="mt-2 text-xl font-bold text-stone-900">
-              פתיחת חתונה חדשה ב-PostgreSQL
-            </h2>
-            <p className="mt-1 text-xs text-stone-500">
-              מסד הנתונים מחובר ומוכן. מלאו את פרטי הזוג כדי ליצור את האירוע הראשון.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <div>
-              <label className="font-medium text-stone-600">שם בן/בת זוג 1</label>
-              <input
-                type="text"
-                required
-                value={nwPartner1}
-                onChange={(e) => setNwPartner1(e.target.value)}
-                placeholder="למשל: דנה"
-                className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="font-medium text-stone-600">שם בן/בת זוג 2</label>
-              <input
-                type="text"
-                required
-                value={nwPartner2}
-                onChange={(e) => setNwPartner2(e.target.value)}
-                placeholder="למשל: עומר"
-                className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="font-medium text-stone-600">תאריך החתונה</label>
-            <input
-              type="date"
-              required
-              value={nwDate}
-              onChange={(e) => setNwDate(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="font-medium text-stone-600">שם האולם / גן האירועים</label>
-            <input
-              type="text"
-              required
-              value={nwVenue}
-              onChange={(e) => setNwVenue(e.target.value)}
-              placeholder="למשל: עלמה - אבן יהודה"
-              className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
-            />
-          </div>
-          <button
-            type="submit"
-            className="mt-4 w-full rounded-xl bg-amber-700 py-3 font-bold text-white hover:bg-amber-800"
-          >
-            + צור חתונה ושמור ב-PostgreSQL
-          </button>
-        </form>
-      </div>
-    );
-  }
+  if (!wedding || !statistics) return null;
 
   const sampleGuest = guests[0] || {
     id: 'preview-guest',
@@ -632,10 +1072,10 @@ export function WeddingPlatformApp() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold tracking-wider uppercase text-amber-700">
-                  Wedding Platform SaaS
+                  Wedding Platform
                 </span>
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                  Multi-Tenant
+                  {authUser.fullName}
                 </span>
               </div>
 
@@ -664,8 +1104,8 @@ export function WeddingPlatformApp() {
             </div>
           </div>
 
-          {/* Right Header Controls: Live Guest Link & RTL/LTR Language Selector */}
-          <div className="flex items-center gap-2.5">
+          {/* Right Header Controls: Live Guest Link, Language Selector & Logout */}
+          <div className="flex items-center gap-2">
             {guests[0] && (
               <Link
                 href={`/i/${guests[0].invitation.shortCode}`}
@@ -694,6 +1134,16 @@ export function WeddingPlatformApp() {
                 </button>
               ))}
             </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="התנתקות מהמערכת"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-rose-700"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              יציאה
+            </button>
           </div>
         </div>
 
@@ -1026,7 +1476,7 @@ export function WeddingPlatformApp() {
             {/* Search & Filter Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-xs">
               <div className="relative flex-1 min-w-[240px]">
-                <Search className=" absolute top-2.5 right-3 h-4 w-4 text-stone-400" />
+                <Search className="absolute top-2.5 right-3 h-4 w-4 text-stone-400" />
                 <input
                   type="text"
                   value={guestSearch}
@@ -1142,6 +1592,14 @@ export function WeddingPlatformApp() {
                               >
                                 <Send className="h-3 w-3" />
                                 WhatsApp
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openEditGuestModal(g)}
+                                title="עריכת מוזמן / עדכון הגעה"
+                                className="rounded-lg border border-stone-200 bg-white p-1.5 text-stone-700 hover:bg-stone-100"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 type="button"
@@ -1284,7 +1742,7 @@ export function WeddingPlatformApp() {
 
               {/* Event Details & Texts */}
               <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-3 text-xs">
-                <h3 className="text-sm font-bold">פרטי החתונה וטקסטים בהזמנה</h3>
+                <h3 className="text-sm font-bold">פרטי החתונה, תאריך, מיקום וטקסטים בהזמנה</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="font-medium text-stone-600">שם בן/בת זוג 1</label>
@@ -1306,7 +1764,21 @@ export function WeddingPlatformApp() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="font-medium text-stone-600">תאריך החתונה</label>
+                    <input
+                      type="date"
+                      value={wedding.eventDate ? wedding.eventDate.slice(0, 10) : ''}
+                      onChange={(e) =>
+                        setWedding({
+                          ...wedding,
+                          eventDate: new Date(e.target.value).toISOString(),
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2"
+                    />
+                  </div>
                   <div>
                     <label className="font-medium text-stone-600">שעת קבלת פנים</label>
                     <input
@@ -1327,20 +1799,68 @@ export function WeddingPlatformApp() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="font-medium text-stone-600">שם האולם / גן האירועים</label>
-                  <input
-                    type="text"
-                    value={wedding.venueName}
-                    onChange={(e) => setWedding({ ...wedding, venueName: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-medium text-stone-600">שם האולם / גן האירועים</label>
+                    <input
+                      type="text"
+                      value={wedding.venueName}
+                      onChange={(e) => setWedding({ ...wedding, venueName: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-medium text-stone-600">כתובת האולם</label>
+                    <input
+                      type="text"
+                      value={wedding.venueAddress}
+                      onChange={(e) => setWedding({ ...wedding, venueAddress: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="font-medium text-stone-600">תמונת נושא (URL)</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-medium text-stone-600">קישור לניווט ב-Waze</label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={wedding.wazeUrl}
+                      onChange={(e) => setWedding({ ...wedding, wazeUrl: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-medium text-stone-600">קישור ל-Google Maps</label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={wedding.googleMapsUrl}
+                      onChange={(e) => setWedding({ ...wedding, googleMapsUrl: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    />
+                  </div>
+                </div>
+
+                {/* Cover Photo Upload & URL */}
+                <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="font-semibold text-stone-700">תמונת הזוג בראש ההזמנה</label>
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-stone-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-stone-800">
+                      <ImagePlus className="h-3.5 w-3.5" />
+                      העלאת תמונה מהמחשב / נייד
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCoverPhotoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                   <input
                     type="text"
+                    dir="ltr"
                     value={wedding.themeConfig.coverImageUrl}
                     onChange={(e) =>
                       setWedding({
@@ -1348,7 +1868,8 @@ export function WeddingPlatformApp() {
                         themeConfig: { ...wedding.themeConfig, coverImageUrl: e.target.value },
                       })
                     }
-                    className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    placeholder="https://..."
+                    className="mt-2 w-full rounded-lg border border-stone-200 bg-white px-3 py-2"
                   />
                 </div>
 
@@ -1375,6 +1896,7 @@ export function WeddingPlatformApp() {
                     <label className="font-medium text-stone-600">קישור מתנה ב-Bit</label>
                     <input
                       type="text"
+                      dir="ltr"
                       value={wedding.giftConfig.bitUrl}
                       onChange={(e) =>
                         setWedding({
@@ -1389,6 +1911,7 @@ export function WeddingPlatformApp() {
                     <label className="font-medium text-stone-600">קישור מתנה ב-PayBox</label>
                     <input
                       type="text"
+                      dir="ltr"
                       value={wedding.giftConfig.payboxUrl}
                       onChange={(e) =>
                         setWedding({
@@ -1506,6 +2029,11 @@ export function WeddingPlatformApp() {
                   >
                     🚀 שליחה אוטומטית מרוכזת ({whatsappCandidates.length} נמענים) — WhatsApp Cloud API
                   </button>
+                  <p className="mt-2 text-center text-[11px] text-stone-500">
+                    {whatsappCloudConfigured
+                      ? '✅ מחובר ל-Meta WhatsApp Cloud API'
+                      : '💡 לשליחה ללא הגדרת Meta Cloud API, השתמשו בכפתור "פתיחה ושליחה בוואטסאפ" מול כל אורח.'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1735,15 +2263,25 @@ export function WeddingPlatformApp() {
                               {table.tableNumber}
                             </h4>
                           </div>
-                          <span
-                            className={`rounded-xl px-2.5 py-1 text-xs font-bold ${
-                              occupiedSeats >= table.capacity
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-stone-100 text-stone-800'
-                            }`}
-                          >
-                            {occupiedSeats} / {table.capacity} מושבים
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`rounded-xl px-2.5 py-1 text-xs font-bold ${
+                                occupiedSeats >= table.capacity
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-stone-100 text-stone-800'
+                              }`}
+                            >
+                              {occupiedSeats} / {table.capacity} מושבים
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTable(table.id)}
+                              title="מחיקת שולחן"
+                              className="rounded-lg border border-rose-200 bg-rose-50 p-1 text-rose-600 hover:bg-rose-100"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Capacity Bar */}
@@ -1893,7 +2431,7 @@ export function WeddingPlatformApp() {
                 ריכוז מתנות דיגיטליות וברכות
               </h2>
               <div className="rounded-2xl bg-rose-50 p-4 text-rose-950">
-                <div className="text-xs opacity-80">סה״כ מתנות שדווחו ע״י האורחים</div>
+                <div className="text-xs opacity-80">סה״כ מתנות שדווחו ע״י האורחים (גלוי רק לכם)</div>
                 <div className="mt-1 text-3xl font-extrabold">
                   ₪{totalGiftsReported.toLocaleString()}
                 </div>
@@ -1923,11 +2461,21 @@ export function WeddingPlatformApp() {
                       <h4 className="font-bold text-stone-900">{gr.authorName}</h4>
                       <span className="text-xs text-stone-500">{gr.relationship}</span>
                     </div>
-                    {gr.giftAmountReported && (
-                      <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
-                        🎁 ₪{gr.giftAmountReported}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {gr.giftAmountReported && (
+                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+                          🎁 ₪{gr.giftAmountReported}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteGreeting(gr.id)}
+                        title="מחיקת ברכה"
+                        className="rounded-lg border border-rose-200 bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <p className="mt-3 text-sm leading-relaxed text-stone-700">“{gr.message}”</p>
                 </div>
@@ -2061,6 +2609,150 @@ export function WeddingPlatformApp() {
                 className="rounded-xl bg-amber-700 px-5 py-2 font-bold text-white hover:bg-amber-800"
               >
                 צור חתונה חדשה
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 3: EDIT GUEST & MANUAL RSVP OVERRIDE */}
+      {editingGuest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <form
+            onSubmit={handleSaveEditedGuest}
+            className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl space-y-3 text-xs"
+          >
+            <h3 className="text-lg font-bold text-stone-900">
+              עריכת מוזמן ועדכון הגעה — {editingGuest.fullName}
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-medium text-stone-600">שם מלא</label>
+                <input
+                  type="text"
+                  required
+                  value={editGuestName}
+                  onChange={(e) => setEditGuestName(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-medium text-stone-600">טלפון</label>
+                <input
+                  type="text"
+                  required
+                  value={editGuestPhone}
+                  onChange={(e) => setEditGuestPhone(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div>
+                <label className="font-medium text-stone-600">מקסימום מוזמנים</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={editGuestMax}
+                  onChange={(e) => setEditGuestMax(Number(e.target.value) || 1)}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-medium text-stone-600">קבוצה</label>
+                <input
+                  type="text"
+                  value={editGuestGroup}
+                  onChange={(e) => setEditGuestGroup(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-medium text-stone-600">צד</label>
+                <select
+                  value={editGuestSide}
+                  onChange={(e) => setEditGuestSide(e.target.value as WeddingSide)}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-2 py-2"
+                >
+                  <option value="PARTNER_1">צד {wedding.partner1Name}</option>
+                  <option value="PARTNER_2">צד {wedding.partner2Name}</option>
+                  <option value="BOTH">משותף</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="border-t border-stone-100 pt-3">
+              <label className="font-bold text-stone-700">סטטוס אישור הגעה (RSVP)</label>
+              <select
+                value={editGuestRsvp}
+                onChange={(e) => {
+                  const next = e.target.value as RsvpStatus;
+                  setEditGuestRsvp(next);
+                  if (next === 'ATTENDING' && editGuestAdults === 0) {
+                    setEditGuestAdults(editGuestMax);
+                  }
+                }}
+                className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 font-semibold"
+              >
+                <option value="PENDING">ממתין למענה ⏳</option>
+                <option value="ATTENDING">מגיעים 🎉</option>
+                <option value="MAYBE">אולי 🤔</option>
+                <option value="DECLINED">לא מגיעים 💔</option>
+              </select>
+            </div>
+
+            {editGuestRsvp !== 'DECLINED' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-medium text-stone-600">מבוגרים מאושרים</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={editGuestAdults}
+                    onChange={(e) => setEditGuestAdults(Number(e.target.value) || 0)}
+                    className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="font-medium text-stone-600">ילדים מאושרים</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={editGuestChildren}
+                    onChange={(e) => setEditGuestChildren(Number(e.target.value) || 0)}
+                    className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="font-medium text-stone-600">הערות תזונה / אלרגיות</label>
+              <input
+                type="text"
+                value={editGuestDietary}
+                onChange={(e) => setEditGuestDietary(e.target.value)}
+                placeholder="צמחוני, ללא גלוטן..."
+                className="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2"
+              />
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingGuest(null)}
+                className="rounded-xl border border-stone-200 px-4 py-2 font-semibold"
+              >
+                ביטול
+              </button>
+              <button
+                type="submit"
+                className="rounded-xl bg-amber-700 px-5 py-2 font-bold text-white hover:bg-amber-800"
+              >
+                שמירת שינויים
               </button>
             </div>
           </form>
